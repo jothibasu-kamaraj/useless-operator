@@ -32,6 +32,7 @@ func GetConfig(runOutsideCluster bool) (*rest.Config, error) {
 		if err != nil {
 			return nil, err
 		}
+		klog.V(1).Infof("Running inside Kubernetes cluster")
 	}
 
 	return config, nil
