@@ -14,18 +14,24 @@ import (
 
 // GetConfig returns
 func GetConfig(runOutsideCluster bool) (*rest.Config, error) {
-	kubeConfigLocation := "" // empty means "autodetect inside pod"
 
+	kubeConfigLocation := ""
+	var config *rest.Config
+	var err error
 	if runOutsideCluster {
 		homeDir := os.Getenv("HOME")
 		kubeConfigLocation = filepath.Join(homeDir, ".kube", "config")
 		klog.V(1).Infof("Kubernetes config Location: %v\n", kubeConfigLocation)
-	}
-
-	// Use the current context in kubeconfig
-	config, err := clientcmd.BuildConfigFromFlags("", kubeConfigLocation)
-	if err != nil {
-		return nil, err
+		// Use the current context in kubeconfig
+		config, err = clientcmd.BuildConfigFromFlags("", kubeConfigLocation)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		config, err = rest.InClusterConfig()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return config, nil
