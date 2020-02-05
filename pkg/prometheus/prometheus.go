@@ -92,8 +92,8 @@ func GetUnusedIngresses(promAddr string, maxSteps int) (map[string]map[string]bo
 			namespaceStartPos := strings.Index(cut[0], `="`)
 			namespaceEndPos := strings.LastIndex(cut[0], `",`)
 
-			namespace := cut[0][namespaceStartPos+2:namespaceEndPos]
-			ingress := cut[0][ingStartPos+2:ingEndPos]
+			namespace := cut[0][namespaceStartPos+2 : namespaceEndPos]
+			ingress := cut[0][ingStartPos+2 : ingEndPos]
 
 			mapAdd(tempMap, namespace, ingress)
 		}
@@ -104,7 +104,9 @@ func GetUnusedIngresses(promAddr string, maxSteps int) (map[string]map[string]bo
 
 		// Delete from resultMap values which are not exists in tempMap
 		for ns, ingressMap := range resultMap {
-			if step == 0 { break }
+			if step == 0 {
+				break
+			}
 			for ingress := range ingressMap {
 				// log.Printf("ns: %v, ing: %v\n", ns, ingress)
 
@@ -188,8 +190,8 @@ func GetUnusedPods(promAddr string, maxSteps int) (map[string]map[string]bool, i
 			namespaceStartPos := strings.Index(cut[0], `="`)
 			namespaceEndPos := strings.LastIndex(cut[0], `",`)
 
-			namespace := cut[0][namespaceStartPos+2:namespaceEndPos]
-			pod := cut[0][podStartPos+2:podEndPos]
+			namespace := cut[0][namespaceStartPos+2 : namespaceEndPos]
+			pod := cut[0][podStartPos+2 : podEndPos]
 
 			mapAdd(tempMap, namespace, pod)
 		}
@@ -201,7 +203,9 @@ func GetUnusedPods(promAddr string, maxSteps int) (map[string]map[string]bool, i
 		// Delete from resultMap values which are not exists in tempMap
 		// TODO: understand why it's slow in debug log mode
 		for ns, podsMap := range resultMap {
-			if step == 0 { break }
+			if step == 0 {
+				break
+			}
 			for pod := range podsMap {
 				// Try to find pod in
 				_, ok := tempMap[ns][pod]

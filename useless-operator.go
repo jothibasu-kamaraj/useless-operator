@@ -22,7 +22,7 @@ func main() {
 		profile           = flag.Bool("profile", false, "Enable profiling on http://0.0.0.0:6060")
 		period            = flag.Int("period", 6, "Observation period in hours.")
 		promAddr          = flag.String("prom-uri", "", "Prometheus URI (e.g. http://localhost:9091).")
-		runOutsideCluster = flag.Bool("run-outside-cluster", false, "Set this flag when running " +
+		runOutsideCluster = flag.Bool("run-outside-cluster", false, "Set this flag when running "+
 			"outside of the cluster.")
 	)
 	var Usage = func() {
@@ -31,8 +31,10 @@ func main() {
 	}
 
 	klogFlags := flag.NewFlagSet("klog", flag.ExitOnError)
-	klog.InitFlags(klogFlags)
+
 	flag.Parse()
+
+	klog.InitFlags(klogFlags)
 	klog.SetOutput(os.Stdout)
 
 	verbosity := klogFlags.Lookup("v")
@@ -46,7 +48,7 @@ func main() {
 			"http://localhost:6060/debug/pprof/\n" +
 			"go tool pprof http://0.0.0.0:6060/debug/pprof/heap\n" +
 			"go tool pprof http://0.0.0.0:6060/debug/pprof/profile?seconds=30\n" +
-		    "go tool pprof http://0.0.0.0:6060/debug/pprof/block\n" +
+			"go tool pprof http://0.0.0.0:6060/debug/pprof/block\n" +
 			"wget http://0.0.0.0:6060/debug/pprof/trace?seconds=5\n" +
 			"go tool pprof http://0.0.0.0:6060/debug/pprof/mutex\n" +
 			"To view all available profiles, open http://0.0.0.0:6060/debug/pprof/ in your browser. ")
@@ -93,7 +95,7 @@ func main() {
 
 	// Estimate unused pods during observation period
 	UselessPodsCnt := 0
-	ObservedNamespacesCnt :=0
+	ObservedNamespacesCnt := 0
 	var allPodsCpu int64 // milli
 	var allPodsMem int64 // bytes
 	for namespace := range namespaces {
@@ -116,11 +118,10 @@ func main() {
 		ObservedNamespacesCnt++
 	}
 
-	klog.V(1).Infof("Requested period: %v hours, Observed period: %v hours, " +
-	"Unused PODs count (no traffic): %v in %v namespaces\n", *period, observedPeriod, UselessPodsCnt,
+	klog.V(1).Infof("Requested period: %v hours, Observed period: %v hours, "+
+		"Unused PODs count (no traffic): %v in %v namespaces\n", *period, observedPeriod, UselessPodsCnt,
 		len(namespaces))
-	klog.V(1).Infof("Reqests: CPU: %v, memory (MB): %v\n", allPodsCpu / 1000, allPodsMem / 1024 / 1024)
-
+	klog.V(1).Infof("Reqests: CPU: %v, memory (MB): %v\n", allPodsCpu/1000, allPodsMem/1024/1024)
 
 	if *profile {
 		fmt.Print("Program stopped. Type something to exit: ")

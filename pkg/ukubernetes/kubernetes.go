@@ -51,7 +51,7 @@ func GetKClient(restconfig *rest.Config) (*kubernetes.Clientset, error) {
 		// Test connection to k8s API server
 		nodes, err := kClient.CoreV1().Nodes().List(metav1.ListOptions{})
 		if err != nil {
-			klog.Warningf("(try #%d of %d)\n", i + 1, len([]int{1, 2, 3}))
+			klog.Warningf("(try #%d of %d)\n", i+1, len([]int{1, 2, 3}))
 			time.Sleep(5 * time.Second)
 
 			continue
