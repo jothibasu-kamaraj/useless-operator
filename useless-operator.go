@@ -87,25 +87,26 @@ func main() {
 	// fmt.Printf("\nCPU: %v, memory: %v\n\n", podCpu, podMem)
 
 	// Query Prometheus
-	namespaces, observedPeriod, err := prom.GetUnusedPods(*promAddr, *period)
+	promQueryPods := `sum(rate(container_network_transmit_packets_total{container_name="POD", 
+				service="prometheus-operator-kubelet"}[1h])) by (namespace, pod_name) == 0`
+	promPodsMap, observedPeriod, err := prom.GetUnusedResources(*promAddr, *period, promQueryPods)
 	if err != nil {
 		klog.Warningf("%v", err)
-		// TODO: retry?
 	}
 
-	// Estimate unused pods during observation period
+	// Estimate resources of unused pods during given observation period
 	UselessPodsCnt := 0
 	ObservedNamespacesCnt := 0
 	var allPodsCpu int64 // milli
 	var allPodsMem int64 // bytes
-	for namespace := range namespaces {
+	for namespace := range promPodsMap {
 		// Pods
-		for pod := range namespaces[namespace] {
+		for pod := range promPodsMap[namespace] {
 			UselessPodsCnt++
 			podCpu, podMem, err := ukube.GetPodRequests(namespace, pod, kClient)
 			if err != nil {
 				// pod may disappear
-				klog.Warningf("%v", err)
+				klog.V(3).Infof("%v", err)
 				continue
 			}
 
@@ -119,10 +120,21 @@ func main() {
 	}
 
 	klog.V(1).Infof("Requested period: %v hours, Observed period: %v hours, "+
-		"Unused PODs count (no traffic): %v in %v namespaces\n", *period, observedPeriod, UselessPodsCnt,
-		len(namespaces))
+		"Unused PODs count (no traffic): %v in %v promPodsMap\n", *period, observedPeriod, UselessPodsCnt,
+		len(promPodsMap))
 	klog.V(1).Infof("Reqests: CPU: %v, memory (MB): %v\n", allPodsCpu/1000, allPodsMem/1024/1024)
 
+	// Get unused ingresses
+
+	promQueryIngresses := "sum(rate(nginx_ingress_controller_requests[1h])) by (ingress, exported_namespace) == 0"
+	promIngressesMap, observedPeriod, err := prom.GetUnusedResources(*promAddr, *period, promQueryIngresses)
+	if err != nil {
+		klog.Warningf("%v", err)
+	}
+
+	klog.V(8).Infof("Ingresses map: \n %v", promIngressesMap)
+
+	// Don't exit if we want profiling (for now)
 	if *profile {
 		fmt.Print("Program stopped. Type something to exit: ")
 		input := bufio.NewScanner(os.Stdin)
@@ -136,4 +148,3 @@ func main() {
 // - Flush logs on exit ?
 // - Get pod's labels to compare
 // - find selectors over Deployments, Daemonsets, StatefulSets, jobs, etc. (compare maps)
-// - find orphan pods?

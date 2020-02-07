@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// GetConfig returns
+// GetConfig returns k8s Config struct
 func GetConfig(runOutsideCluster bool) (*rest.Config, error) {
 
 	kubeConfigLocation := ""
