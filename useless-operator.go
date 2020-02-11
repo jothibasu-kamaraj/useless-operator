@@ -86,15 +86,18 @@ func main() {
 	// podCpu, podMem, err := ukube.GetPodRequests("ops-test", "busybox1", kClient)
 	// fmt.Printf("\nCPU: %v, memory: %v\n\n", podCpu, podMem)
 
-	// Query Prometheus
+	// Query Prometheus for unused pods
+	klog.V(3).Info("Querying Prometheus for unused pods...")
 	promQueryPods := `sum(rate(container_network_transmit_packets_total{container_name="POD", 
 				service="prometheus-operator-kubelet"}[1h])) by (namespace, pod_name) == 0`
 	promPodsMap, observedPeriod, err := prom.GetUnusedResources(*promAddr, *period, promQueryPods)
 	if err != nil {
+		// Resource may disappear, don't panic
 		klog.Warningf("%v", err)
 	}
 
 	// Estimate resources of unused pods during given observation period
+	klog.V(3).Info("Estimating resources of unused pods during given observation period...")
 	UselessPodsCnt := 0
 	ObservedNamespacesCnt := 0
 	var allPodsCpu int64 // milli
@@ -103,17 +106,16 @@ func main() {
 		// Pods
 		for pod := range promPodsMap[namespace] {
 			UselessPodsCnt++
-			podCpu, podMem, err := ukube.GetPodRequests(namespace, pod, kClient)
+			podCpu, podMem, err := ukube.GetPodRequests(string(namespace), string(pod), kClient)
 			if err != nil {
-				// pod may disappear
-				klog.V(3).Infof("%v", err)
+				klog.V(4).Infof("%v (resource may disappear)", err)
 				continue
 			}
 
 			allPodsCpu += podCpu
 			allPodsMem += podMem
 
-			klog.V(3).Infof("Namespace: %v, POD: %v, Reqests: mCPU: %v, memory (bytes): %v\n", namespace,
+			klog.V(4).Infof("Namespace: %v, POD: %v, Reqests: mCPU: %v, memory (bytes): %v\n", namespace,
 				pod, podCpu, podMem)
 		}
 		ObservedNamespacesCnt++
@@ -124,15 +126,38 @@ func main() {
 		len(promPodsMap))
 	klog.V(1).Infof("Reqests: CPU: %v, memory (MB): %v\n", allPodsCpu/1000, allPodsMem/1024/1024)
 
-	// Get unused ingresses
 
-	promQueryIngresses := "sum(rate(nginx_ingress_controller_requests[1h])) by (ingress, exported_namespace) == 0"
-	promIngressesMap, observedPeriod, err := prom.GetUnusedResources(*promAddr, *period, promQueryIngresses)
+	// Get unused ingresses
+	klog.V(3).Info("Getting unused ingresses...")
+
+	IngressMap := prom.IngressMap{} // TODO: move outside infinite loop
+	promQueryIngresses := "sum(rate(nginx_ingress_controller_request_size_count[1h])) by (exported_namespace, ingress, host, path) == 0"
+
+	IngObservedPeriod, err := IngressMap.GetUnusedIngresses(*promAddr, *period, promQueryIngresses)
 	if err != nil {
-		klog.Warningf("%v", err)
+		klog.V(4).Infof("%v (resource may disappear)", err)
 	}
 
-	klog.V(8).Infof("Ingresses map: \n %v", promIngressesMap)
+	klog.V(1).Infof("'Unused Ingresses' observed period: %v\n", IngObservedPeriod)
+	klog.V(3).Infof("\nIngresses map: %v\n", IngressMap)
+
+	// Get backends of unused ingresses
+	klog.V(3).Info("Getting backends of unused ingresses...")
+	for ns, ingMap := range IngressMap.M {
+		for ing, hostMap := range ingMap {
+			for host, pathMap := range hostMap {
+				for path := range pathMap {
+					back, err := ukube.GetIngressBackend(kClient, string(ns), string(ing), string(host), string(path))
+					if err != nil {
+						klog.Warningf("%v", err)
+					}
+					// Assign
+					IngressMap.M[ns][ing][host][path] = prom.IngressBackend(back)
+					klog.V(3).Infof("ns: %v, ing: %v, host: %v, path: %v, back: %v", ns, ing, host, path, back)
+				}
+			}
+		}
+	}
 
 	// Don't exit if we want profiling (for now)
 	if *profile {
@@ -144,7 +169,7 @@ func main() {
 }
 
 // TODO:
-// - Cache
-// - Flush logs on exit ?
-// - Get pod's labels to compare
-// - find selectors over Deployments, Daemonsets, StatefulSets, jobs, etc. (compare maps)
+// - unused pods: find selectors over Deployments, Daemonsets, StatefulSets, jobs, etc. (compare maps)
+// - unused Ingresses: get backends
+// - services: get selectors
+// - Logic to compare observed and requested period
