@@ -191,6 +191,7 @@ func GetUnusedResources(promAddr string, maxSteps int, promQuery string) (map[Na
 				}
 			}
 		}
+		// TODO: delete empty namespaces. This is a bug!
 	}
 
 	return resultMap, observedPeriod, nil
@@ -257,7 +258,7 @@ func (resultMap *IngressMap) GetUnusedIngresses(promAddr string, maxSteps int, p
 			ingress := GetLabelVal(&str, "ingress")
 			host := GetLabelVal(&str, "host")
 			path := GetLabelVal(&str, "path")
-			// TODO: validate len of each value ans skip failed strings
+			// TODO: validate len of each value and skip failed strings (now work-arounded in the Prometheus query)
 
 			tempMap.AddIntoIngMap(IngNamespace(namespace), Ingress(ingress), Host(host), Path(path))
 		}

@@ -106,7 +106,7 @@ func main() {
 		// Pods
 		for pod := range promPodsMap[namespace] {
 			UselessPodsCnt++
-			podCpu, podMem, err := ukube.GetPodRequests(string(namespace), string(pod), kClient)
+			podCpu, podMem, err := ukube.GetPodRequests(kClient, string(namespace), string(pod))
 			if err != nil {
 				klog.V(4).Infof("%v (resource may disappear)", err)
 				continue
@@ -124,14 +124,15 @@ func main() {
 	klog.V(1).Infof("Requested period: %v hours, Observed period: %v hours, "+
 		"Unused PODs count (no traffic): %v in %v promPodsMap\n", *period, observedPeriod, UselessPodsCnt,
 		len(promPodsMap))
-	klog.V(1).Infof("Reqests: CPU: %v, memory (MB): %v\n", allPodsCpu/1000, allPodsMem/1024/1024)
+	klog.V(1).Infof("Reqests: CPU: %v, memory (MB): %v\n", float64(allPodsCpu)/1000, allPodsMem/1024/1024)
 
 
 	// Get unused ingresses
 	klog.V(3).Info("Getting unused ingresses...")
 
 	IngressMap := prom.IngressMap{} // TODO: move outside infinite loop
-	promQueryIngresses := "sum(rate(nginx_ingress_controller_request_size_count[1h])) by (exported_namespace, ingress, host, path) == 0"
+	promQueryIngresses := `sum(rate(nginx_ingress_controller_request_size_count{exported_namespace!=""
+,ingress!="",host!="",path!=""}[1h])) by (exported_namespace, ingress, host, path) == 0`
 
 	IngObservedPeriod, err := IngressMap.GetUnusedIngresses(*promAddr, *period, promQueryIngresses)
 	if err != nil {
@@ -139,10 +140,14 @@ func main() {
 	}
 
 	klog.V(1).Infof("'Unused Ingresses' observed period: %v\n", IngObservedPeriod)
-	klog.V(3).Infof("\nIngresses map: %v\n", IngressMap)
 
-	// Get backends of unused ingresses
+	// Get backends of unused ingresses, estimate their pods requested resources
+
 	klog.V(3).Info("Getting backends of unused ingresses...")
+	UselessPodsCnt = 0
+	allPodsCpu = 0 // milli
+	allPodsMem = 0 // bytes
+
 	for ns, ingMap := range IngressMap.M {
 		for ing, hostMap := range ingMap {
 			for host, pathMap := range hostMap {
@@ -151,13 +156,42 @@ func main() {
 					if err != nil {
 						klog.Warningf("%v", err)
 					}
-					// Assign
+					// Add Ingress backend into shared IngressMap
 					IngressMap.M[ns][ing][host][path] = prom.IngressBackend(back)
 					klog.V(3).Infof("ns: %v, ing: %v, host: %v, path: %v, back: %v", ns, ing, host, path, back)
+
+					// Get services behind backends
+					selector, err := ukube.GetSvcSelectorByIngressBackend(kClient, string(ns), prom.IngressBackend(back).ServiceName)
+					if err != nil {
+						klog.Warningf("%v", err)
+					}
+					klog.V(3).Infof("Selector: %v", selector)
+
+					pods, err := ukube.GetPodsBySelector(kClient, string(ns), selector)
+					if err != nil {
+						klog.Warningf("%v", err)
+					}
+
+					for _, podName := range pods.Items {
+						klog.V(3).Infof("Pod: %v", podName.Name)
+						podCpu, podMem, err := ukube.GetPodRequests(kClient, string(ns), podName.Name)
+						if err != nil {
+							klog.V(3).Infof("%v (resource may disappear)", err)
+							continue
+						}
+
+						UselessPodsCnt += 1
+						allPodsCpu += podCpu
+						allPodsMem += podMem
+
+					}
 				}
 			}
 		}
 	}
+
+	klog.V(1).Infof("\nIngresses: Unused PODs count from Ingresses (no traffic): %v \n", UselessPodsCnt)
+	klog.V(1).Infof("Ingresses: Reqests: CPU: %v, clean: %v, memory (MB): %v\n", float64(allPodsCpu)/1000, allPodsCpu, allPodsMem/1024/1024)
 
 	// Don't exit if we want profiling (for now)
 	if *profile {

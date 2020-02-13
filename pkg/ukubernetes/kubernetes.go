@@ -2,7 +2,9 @@ package ukubernetes
 
 import (
 	"fmt"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	labels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"k8s.io/client-go/kubernetes"
@@ -10,7 +12,6 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -106,22 +107,36 @@ func GetKClient(restconfig *rest.Config) (*kubernetes.Clientset, error) {
 //	return mClient, err
 //}
 
-// GetSvcSelector returns ingresse's selector
-func GetSvcSelector(kClient kubernetes.Clientset, namespace, ingress string) map[string]string {
-	svc, err := kClient.CoreV1().Services(namespace).Get(ingress, metav1.GetOptions{})
+// GetSvcSelectorByIngressBackend returns service's selector
+func GetSvcSelectorByIngressBackend(kClient *kubernetes.Clientset, namespace string, ServiceName string) (map[string]string, error) {
+	svc, err := kClient.CoreV1().Services(namespace).Get(ServiceName, metav1.GetOptions{})
 	if err != nil {
-		log.Printf("ERROR: %v\n", err)
-		// Avoid races "...if service was deleted while querying API"
-		return nil
+		return nil, err
 	}
 
-	return svc.Spec.Selector
+	return svc.Spec.Selector, nil
+}
+
+// GetPodsBySelector
+func GetPodsBySelector(kClient *kubernetes.Clientset, namespace string, selector map[string]string) (*v1.PodList, error) {
+
+	// Obtain string form of selector
+	lp := labels.Set(selector).String()
+
+
+	pods, err := kClient.CoreV1().Pods(namespace).List(metav1.ListOptions{LabelSelector: lp})
+	if err != nil {
+		return nil, err
+	}
+
+	return pods, nil
 }
 
 // GetIngressBackend returns ingress backend by specific host and path
 func GetIngressBackend(kClient *kubernetes.Clientset, namespace, ingress, host, path string) (backend IngressBackend, err error) {
 
 	ingressStruct, err := kClient.ExtensionsV1beta1().Ingresses(namespace).Get(ingress, metav1.GetOptions{})
+	
 	if err != nil {
 		return backend, err
 	}
@@ -129,7 +144,6 @@ func GetIngressBackend(kClient *kubernetes.Clientset, namespace, ingress, host, 
 	found := false
 	for _, rule := range ingressStruct.Spec.Rules {
 		if rule.Host == host {
-			// TODO: fix empty paths
 			for _, tPath := range rule.IngressRuleValue.HTTP.Paths {
 				if tPath.Path == path || tPath.Path == "" {
 					backend = IngressBackend(tPath.Backend)
@@ -149,9 +163,9 @@ func GetIngressBackend(kClient *kubernetes.Clientset, namespace, ingress, host, 
 // GetPodsCpuReq returns CPU and memory requests
 // 0.100 CPU mean "1/10 of 1 core CPU time".
 // memory units is bytes
-func GetPodRequests(namespace, pod string, kClient *kubernetes.Clientset) (int64, int64, error) {
-	// TODO: use batching here
-	pods, err := kClient.CoreV1().Pods(namespace).Get(pod, metav1.GetOptions{})
+func GetPodRequests(kClient *kubernetes.Clientset, namespace, podName string) (cpu int64, mem int64, err error) {
+
+	pods, err := kClient.CoreV1().Pods(namespace).Get(podName, metav1.GetOptions{})
 	if err != nil {
 		return 0, 0, err
 	}
