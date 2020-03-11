@@ -40,12 +40,12 @@ kubectl -n platform scale deployment sbs-mock-deployment --replicas=0
 ``` 
 
 ### Features/Roadmap:
-- [x] Detect orphaned Pods without outgoing traffic (/)
-- [x] Detect orphaned Ingresses and their Pods (/)
+- [x] Detect orphaned Pods without outgoing traffic
+- [x] Detect orphaned Ingresses and their Pods
 - [ ] Detect pods which are in permanent failed state (they are consumes resources too)
-- [x] Calculate resources (CPU and memory "Requests") of the orphaned resources (/)
+- [x] Calculate resources (CPU and memory "Requests") of the orphaned resources
 - Detect "parents" of orphaned resources:
-  - [x] Deployments (/)
+  - [x] Deployments
 - [ ] Expose metrics into Prometheus
 - [ ] "Operator" mode
 - [ ] Helm chart
