@@ -26,7 +26,7 @@ func main() {
 			"outside of the cluster.")
 	)
 	var Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", os.Args[0])
+		_, _ = fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 
@@ -38,7 +38,7 @@ func main() {
 	klog.SetOutput(os.Stdout)
 
 	verbosity := klogFlags.Lookup("v")
-	verbosity.Value.Set(strconv.Itoa(*v))
+	_ = verbosity.Value.Set(strconv.Itoa(*v))
 
 	klog.V(0).Infof("Verbosity level set to %v", klogFlags.Lookup("v").Value)
 
@@ -86,6 +86,16 @@ func main() {
 	// podCpu, podMem, err := ukube.GetPodRequests("ops-test", "busybox1", kClient)
 	// fmt.Printf("\nCPU: %v, memory: %v\n\n", podCpu, podMem)
 
+	// Init a map of useless pods ("Element" key is a Pod, Pod's value is a Deployment (string))
+	var uselessPodsMap = map[prom.Namespace]map[prom.Element]string{}
+
+	// Init a map of unused Deployments (Element is Deployment)
+	var uselessDeploymentsMap = map[prom.Namespace]map[prom.Element]string{}
+
+	//
+	// PART 1
+	//
+
 	// Query Prometheus for unused pods
 	klog.V(3).Info("Querying Prometheus for unused pods...")
 	promQueryPods := `sum(rate(container_network_transmit_packets_total{container_name="POD", 
@@ -97,7 +107,7 @@ func main() {
 	}
 
 	// Estimate resources of unused pods during given observation period
-	klog.V(3).Info("Estimating resources of unused pods during given observation period...")
+	klog.V(3).Info("Estimating resources of unused pods during given observation period (querying API)...")
 	UselessPodsCnt := 0
 	ObservedNamespacesCnt := 0
 	var allPodsCpu int64 // milli
@@ -106,7 +116,7 @@ func main() {
 		// Pods
 		for pod := range promPodsMap[namespace] {
 			UselessPodsCnt++
-			podCpu, podMem, err := ukube.GetPodRequests(kClient, string(namespace), string(pod))
+			var podCpu, podMem, err = ukube.GetPodRequests(kClient, string(namespace), string(pod))
 			if err != nil {
 				klog.V(4).Infof("%v (resource may disappear)", err)
 				continue
@@ -117,15 +127,38 @@ func main() {
 
 			klog.V(4).Infof("Namespace: %v, POD: %v, Reqests: mCPU: %v, memory (bytes): %v\n", namespace,
 				pod, podCpu, podMem)
+
+			// Get pod's Deployment
+			deployments, err := ukube.GetPodDeployment(kClient, string(namespace), string(pod))
+			if err != nil {
+				klog.V(4).Infof("%v (resource may disappear)", err)
+				continue
+			}
+
+			if len(deployments) > 1 {
+				klog.V(0).Infof("ERROR: more than 1 deployments of one pod: %v/%v", string(namespace), string(pod))
+				os.Exit(42)
+			}
+
+			// Non-deployment pod. TODO: detect pods without replication controller
+			if len(deployments) == 0 {
+				continue
+			}
+
+			prom.MapAdd(uselessPodsMap, namespace, pod, deployments[0])
+			klog.V(4).Infof("\n\npod: '%v/%v', Deployment:\n %v\n\n", string(namespace), string(pod), deployments[0])
 		}
 		ObservedNamespacesCnt++
 	}
 
 	klog.V(1).Infof("Requested period: %v hours, Observed period: %v hours, "+
-		"Unused PODs count (no traffic): %v in %v promPodsMap\n", *period, observedPeriod, UselessPodsCnt,
+		"Unused PODs count (no traffic): %v pods in %v namespaces\n", *period, observedPeriod, UselessPodsCnt,
 		len(promPodsMap))
-	klog.V(1).Infof("Reqests: CPU: %v, memory (MB): %v\n", float64(allPodsCpu)/1000, allPodsMem/1024/1024)
+	klog.V(1).Infof("Reqests of unused pods: CPU: %v, memory (MB): %v\n", float64(allPodsCpu)/1000, allPodsMem/1024/1024)
 
+	//
+	// PART 2
+	//
 
 	// Get unused ingresses
 	klog.V(3).Info("Getting unused ingresses...")
@@ -158,14 +191,14 @@ func main() {
 					}
 					// Add Ingress backend into shared IngressMap
 					IngressMap.M[ns][ing][host][path] = prom.IngressBackend(back)
-					klog.V(3).Infof("ns: %v, ing: %v, host: %v, path: %v, back: %v", ns, ing, host, path, back)
+					klog.V(4).Infof("ns: %v, ing: %v, host: %v, path: %v, back: %v", ns, ing, host, path, back)
 
 					// Get services behind backends
 					selector, err := ukube.GetSvcSelectorByIngressBackend(kClient, string(ns), prom.IngressBackend(back).ServiceName)
 					if err != nil {
 						klog.Warningf("%v", err)
 					}
-					klog.V(3).Infof("Selector: %v", selector)
+					klog.V(4).Infof("Selector: %v", selector)
 
 					pods, err := ukube.GetPodsBySelector(kClient, string(ns), selector)
 					if err != nil {
@@ -173,10 +206,10 @@ func main() {
 					}
 
 					for _, podName := range pods.Items {
-						klog.V(3).Infof("Pod: %v", podName.Name)
+						klog.V(4).Infof("Pod: %v", podName.Name)
 						podCpu, podMem, err := ukube.GetPodRequests(kClient, string(ns), podName.Name)
 						if err != nil {
-							klog.V(3).Infof("%v (resource may disappear)", err)
+							klog.V(4).Infof("%v (resource may disappear)", err)
 							continue
 						}
 
@@ -191,7 +224,24 @@ func main() {
 	}
 
 	klog.V(1).Infof("\nIngresses: Unused PODs count from Ingresses (no traffic): %v \n", UselessPodsCnt)
-	klog.V(1).Infof("Ingresses: Reqests: CPU: %v, clean: %v, memory (MB): %v\n", float64(allPodsCpu)/1000, allPodsCpu, allPodsMem/1024/1024)
+	klog.V(1).Infof("Ingresses Reqests: CPU: %v, memory (MB): %v\n", float64(allPodsCpu)/1000, allPodsMem/1024/1024)
+
+	// Print command for cleanup useless Deployments
+
+	// Fill uselessDeploymentsMap
+	for namespace, podMap := range uselessPodsMap {
+		for _, deployment := range podMap {
+			prom.MapAdd(uselessDeploymentsMap, namespace, prom.Element(deployment), "")
+		}
+	}
+
+	klog.V(1).Infof("Use the following commands to free resources in the cluster:\n")
+	fmt.Println()
+	for namespace, depMap := range uselessDeploymentsMap {
+		for deployment := range depMap {
+			fmt.Printf("kubectl -n %v scale deployment %v --replicas=0\n", namespace, deployment)
+		}
+	}
 
 	// Don't exit if we want profiling (for now)
 	if *profile {

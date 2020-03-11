@@ -4,7 +4,7 @@ import (
 	"fmt"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	labels "k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"k8s.io/client-go/kubernetes"
@@ -74,7 +74,7 @@ func GetKClient(restconfig *rest.Config) (*kubernetes.Clientset, error) {
 	}
 
 	var gotNodes = false
-	for i, _ := range []int{1, 2, 3} {
+	for i := range []int{1, 2, 3} {
 		// Test connection to k8s API server
 		nodes, err := kClient.CoreV1().Nodes().List(metav1.ListOptions{})
 		if err != nil {
@@ -165,14 +165,14 @@ func GetIngressBackend(kClient *kubernetes.Clientset, namespace, ingress, host, 
 // memory units is bytes
 func GetPodRequests(kClient *kubernetes.Clientset, namespace, podName string) (cpu int64, mem int64, err error) {
 
-	pods, err := kClient.CoreV1().Pods(namespace).Get(podName, metav1.GetOptions{})
+	pod, err := kClient.CoreV1().Pods(namespace).Get(podName, metav1.GetOptions{})
 	if err != nil {
 		return 0, 0, err
 	}
 
 	var podCpu int64
 	var podMem int64
-	for _, containerName := range pods.Spec.Containers {
+	for _, containerName := range pod.Spec.Containers {
 		qContainerCpu := containerName.Resources.Requests["cpu"]
 		containerCpu := qContainerCpu.MilliValue()
 
@@ -185,4 +185,38 @@ func GetPodRequests(kClient *kubernetes.Clientset, namespace, podName string) (c
 	}
 
 	return podCpu, podMem, nil
+}
+
+// GetPodDeployment return's pod's Deployment object
+func GetPodDeployment(kClient *kubernetes.Clientset, namespace, podName string) (deployments []string, err error) {
+	pod, err := kClient.CoreV1().Pods(namespace).Get(podName, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	var ds string
+
+	if len(pod.OwnerReferences) > 0 {
+		for _, ref := range pod.OwnerReferences {
+			if ref.Kind != "ReplicaSet" {
+				continue
+			} else {
+				replicaSet, err := kClient.AppsV1().ReplicaSets(namespace).Get(ref.Name, metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				if replicaSet.OwnerReferences[0].Kind == "Deployment" {
+					ds = replicaSet.OwnerReferences[0].Name
+				}
+			}
+			if ds == "" {
+				continue
+			}
+			deployments = append(deployments, ds)
+		}
+	} else {
+		return nil, err
+	}
+
+	return deployments, nil
 }

@@ -84,34 +84,34 @@ func GetLabelVal(str *string, label string) string {
 	return (*str)[valueStartPos:valueEndPos]
 }
 
-// mapAdd adds element into map of map
-func mapAdd(m map[Namespace]map[Element]bool, ns Namespace, elem Element) {
+// MapAdd adds element into map of map
+func MapAdd(m map[Namespace]map[Element]string, ns Namespace, elem Element, deployment string) {
 	// Try to read outer map by key (ns)
 	mm, ok := m[ns]
 	if !ok {
 		// Make empty inner map
-		mm = make(map[Element]bool)
+		mm = make(map[Element]string)
 		// Create outer map key as an empty inner map
 		m[ns] = mm
 	}
 	// Add element into inner map
-	mm[elem] = true
+	mm[elem] = deployment
 }
 
 // GetUnusedResources returns map of unused resources with real observed period in hours.
 // This function works only for metrics with two elements. Example:
 // `sum(rate(nginx_ingress_controller_requests[1h])) by (ingress, exported_namespace) == 0`
-func GetUnusedResources(promAddr string, maxSteps int, promQuery string) (map[Namespace]map[Element]bool, int, error) {
+func GetUnusedResources(promAddr string, maxSteps int, promQuery string) (map[Namespace]map[Element]string, int, error) {
 
 	// Resulting map to return
-	var resultMap = map[Namespace]map[Element]bool{}
+	var resultMap = map[Namespace]map[Element]string{}
 
 	// Setup Prometheus client
 	client, err := api.NewClient(api.Config{
 		Address: promAddr,
 	})
 	if err != nil {
-		return map[Namespace]map[Element]bool{}, 0, err
+		return map[Namespace]map[Element]string{}, 0, err
 	}
 	v1api := v1.NewAPI(client)
 
@@ -126,7 +126,7 @@ func GetUnusedResources(promAddr string, maxSteps int, promQuery string) (map[Na
 		// Query Prometheus (opens connection)
 		result, warnings, err := v1api.Query(ctx, promQuery, startTime)
 		if err != nil {
-			return map[Namespace]map[Element]bool{}, 0, err
+			return map[Namespace]map[Element]string{}, 0, err
 		}
 		if len(warnings) > 0 {
 			klog.Warningf("Warnings: %v\n", warnings)
@@ -144,7 +144,7 @@ func GetUnusedResources(promAddr string, maxSteps int, promQuery string) (map[Na
 		}
 
 		// Temporary map for current step
-		var tempMap = map[Namespace]map[Element]bool{}
+		var tempMap = map[Namespace]map[Element]string{}
 
 		// Parse strings and add to map
 		for _, str := range strs {
@@ -168,7 +168,7 @@ func GetUnusedResources(promAddr string, maxSteps int, promQuery string) (map[Na
 			namespace := Namespace(cut[0][namespaceStartPos+2 : namespaceEndPos])
 			res := Element(cut[0][resStartPos+2 : resEndPos])
 
-			mapAdd(tempMap, namespace, res)
+			MapAdd(tempMap, namespace, res, "")
 		}
 
 		if step == 0 {
